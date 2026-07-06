@@ -51,7 +51,9 @@
             Site will release on July 11, 2026 at 12 PM EST.
           </div>
 
-          <form id="releaseNotifyForm" action="https://buttondown.email/api/emails/embed-subscribe/air" method="post" target="popupwindow" style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+          <iframe name="buttondownFrame" style="display:none;"></iframe>
+
+          <form id="releaseNotifyForm" action="https://buttondown.email/api/emails/embed-subscribe/air" method="post" target="buttondownFrame" style="display:grid;grid-template-columns:1fr auto;gap:12px;">
             <input id="releaseEmail" name="email" type="email" autocomplete="email" placeholder="Enter your email" required style="min-height:50px;border:2px solid #d6e8f8;border-radius:999px;padding:12px 16px;font:inherit;">
             <button type="submit" style="min-height:50px;border:0;border-radius:999px;padding:12px 20px;background:#2478c7;color:white;font:inherit;font-weight:800;cursor:pointer;">
               Notify me
@@ -67,10 +69,22 @@
       var input = document.getElementById("releaseEmail");
       var message = document.getElementById("releaseMessage");
 
+      if (!input.checkValidity()) {
+        event.preventDefault();
+        message.textContent = "Please enter a valid email.";
+        return;
+      }
+
       if (!saveEmail(input.value)) {
         event.preventDefault();
         message.textContent = "All the email spots are taken. However, you can reach this site on July 11, 2026 at 12 PM EST.";
+        return;
       }
+
+      message.textContent = "You're on the list for the TypeFlow launch.";
+      setTimeout(function () {
+        input.value = "";
+      }, 300);
     });
   }
 
@@ -80,4 +94,3 @@
     showReleaseScreen();
   }
 })();
- 

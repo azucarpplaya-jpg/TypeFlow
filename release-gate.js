@@ -51,7 +51,7 @@
             Site will release on July 11, 2026 at 12 PM EST.
           </div>
 
-          <form id="releaseNotifyForm" action="https://buttondown.email/api/emails/embed-subscribe/airfirico" method="post" target="popupwindow" style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+          <form id="releaseNotifyForm" action="https://buttondown.email/api/emails/embed-subscribe/air" method="post" target="popupwindow" style="display:grid;grid-template-columns:1fr auto;gap:12px;">
             <input id="releaseEmail" name="email" type="email" autocomplete="email" placeholder="Enter your email" required style="min-height:50px;border:2px solid #d6e8f8;border-radius:999px;padding:12px 16px;font:inherit;">
             <button type="submit" style="min-height:50px;border:0;border-radius:999px;padding:12px 20px;background:#2478c7;color:white;font:inherit;font-weight:800;cursor:pointer;">
               Notify me

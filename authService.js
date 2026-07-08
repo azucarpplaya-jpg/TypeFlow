@@ -1,133 +1,160 @@
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
+import { initializeApp } from "firebase/app";
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
-const auth = getAuth();
-const db = getFirestore();
+// 1. Firebase Configuration (Customized for your TypeFlow project)
+const firebaseConfig = {
+  apiKey: "YOUR_FIREBASE_API_KEY", // Get this from your Firebase Console settings
+  authDomain: "typeflow-dea64.firebaseapp.com",
+  projectId: "typeflow-dea64",
+  storageBucket: "typeflow-dea64.firebasestorage.app",
+  messagingSenderId: "50280819655",
+  appId: "YOUR_WEB_APP_APP_ID" // Get this from your Firebase Console settings
+};
 
-// Helper to generate a random secure string
-function generateSecureString(length: number = 12): string {
+// Initialize Firebase services
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Helper to generate secure random credentials under the hood
+function generateSecureString(length = 12) {
   const array = new Uint8Array(length);
   window.crypto.getRandomValues(array);
   return Array.from(array, dec => dec.toString(16).padStart(2, '0')).join('');
 }
 
-// 1. Admin Verification
-export function isAdmin(): boolean {
-  const user = auth.currentUser;
-  return user !== null && user.displayName === "TypeFlow";
-}
-
-// 2. Admin Action: Ban a user
-export async function banUser(userUidToBan: string) {
-  if (!isAdmin()) {
-    throw new Error("Unauthorized! Only TypeFlow can ban users.");
+// 2. Automated Legacy Data Sweeper (Invisible to guardians)
+function findLegacyUsername() {
+  const commonKeys = ["user", "username", "displayName", "profile", "login", "loggedIn", "name", "currentUser", "session", "player"];
+  for (const key of commonKeys) {
+    const rawData = localStorage.getItem(key);
+    if (!rawData) continue;
+    try {
+      const parsed = JSON.parse(rawData);
+      if (parsed && typeof parsed === "object") {
+        const name = parsed.username || parsed.displayName || parsed.name || parsed.user;
+        if (name && typeof name === "string") return name;
+      }
+    } catch (e) {
+      if (typeof rawData === "string" && rawData.trim().length > 0 && rawData !== "true" && rawData !== "false") {
+        return rawData.trim();
+      }
+    }
   }
-  const banRef = doc(db, "banned_users", userUidToBan);
-  await setDoc(banRef, {
-    bannedAt: new Date().toISOString(),
-    bannedBy: "TypeFlow"
-  });
+  return null;
 }
 
-// 3. Username Availability Check
-export async function isUsernameAvailable(username: string): Promise<boolean> {
-  const cleanedUsername = username.trim().toLowerCase();
-  if (!cleanedUsername) return false;
-
-  const usernameRef = doc(db, "usernames", cleanedUsername);
-  const snap = await getDoc(usernameRef);
-  return !snap.exists(); // Returns true if the username is free
+function purgeLegacyKeys() {
+  const commonKeys = ["user", "username", "displayName", "profile", "login", "loggedIn", "name", "currentUser", "session", "player", "old_user_profile"];
+  commonKeys.forEach(key => localStorage.removeItem(key));
 }
 
-// 4. Secure Signup with a Unique Username
-export async function signupWithUsername(chosenUsername: string): Promise<User> {
+// 3. Username Unique Check
+export async function isUsernameAvailable(username) {
+  const cleaned = username.trim().toLowerCase();
+  if (!cleaned) return false;
+  const snap = await getDoc(doc(db, "usernames", cleaned));
+  return !snap.exists();
+}
+
+// 4. One-Click Signup with Username (No password typing needed)
+export async function signupWithUsername(chosenUsername) {
   const cleanedUsername = chosenUsername.trim();
   const lowerUsername = cleanedUsername.toLowerCase();
 
-  // Ensure username is not already taken
   const available = await isUsernameAvailable(lowerUsername);
-  if (!available) {
-    throw new Error("This username is already taken. Please choose another one!");
-  }
+  if (!available) throw new Error("This username is already taken! Please try a different name.");
 
-  // Generate secure backend credentials
-  const uniqueId = generateSecureString(6); 
-  const dummyEmail = `user_${uniqueId}@typeflow.local`;
+  // Generate invisible secure credentials
+  const dummyEmail = `user_${generateSecureString(6)}@typeflow.local`;
   const dummyPassword = generateSecureString(16);
 
-  // Create Firebase Auth account
+  // Register in Firebase Auth
   const userCredential = await createUserWithEmailAndPassword(auth, dummyEmail, dummyPassword);
   const user = userCredential.user;
 
-  // Save username to the Auth profile
+  // Update profile and reserve username in database
   await updateProfile(user, { displayName: cleanedUsername });
+  await setDoc(doc(db, "usernames", lowerUsername), { uid: user.uid });
+  await setDoc(doc(db, "users", user.uid), { username: cleanedUsername, createdAt: new Date().toISOString() });
 
-  // Reserve the username in Firestore to prevent others from taking it
-  const usernameRef = doc(db, "usernames", lowerUsername);
-  await setDoc(usernameRef, { uid: user.uid });
-
-  // Save backup credentials locally for recovery
+  // Save secure local backup for future automatic recovery
   localStorage.setItem("tf_backup_creds", JSON.stringify({ email: dummyEmail, password: dummyPassword }));
   return user;
 }
 
-// 5. Restore Login (Restores session if cache/cookies are cleared)
-export async function loginWithBackupCredentials(): Promise<User | null> {
+// 5. Automatic Session Restorer
+export async function loginWithBackupCredentials() {
   const backupRaw = localStorage.getItem("tf_backup_creds");
-  if (!backupRaw) {
-    console.log("No backup credentials found in localStorage.");
-    return null;
-  }
-
+  if (!backupRaw) return null;
   try {
     const { email, password } = JSON.parse(backupRaw);
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    console.log("Successfully restored session from backup credentials.");
     return userCredential.user;
-  } catch (error) {
-    console.error("Backup restore failed:", error);
+  } catch {
     return null;
   }
 }
 
-// 6. Unified Initialization check (Auto-login / Auto-migrate / Ban Check)
-export function initializeAppAuth(callbacks: {
-  onSignedIn: (user: User) => void;
-  onBanned: () => void;
-  onSignedOut: () => void;
-}) {
+// 6. Admin Verification & Banning Actions
+export function isAdmin() {
+  const user = auth.currentUser;
+  return user !== null && user.displayName === "TypeFlow";
+}
+
+export async function banUser(uidToBan) {
+  if (!isAdmin()) throw new Error("Unauthorized! Only the admin profile named 'TypeFlow' can ban accounts.");
+  await setDoc(doc(db, "banned_users", uidToBan), { bannedAt: new Date().toISOString(), bannedBy: "TypeFlow" });
+}
+
+// 7. Complete UI Takeover Engine
+export function autoTakeoverUI(domIds) {
+  const loading = document.getElementById(domIds.loadingScreenId);
+  const oldUi = document.getElementById(domIds.oldSignupUiId);
+  const dashboard = document.getElementById(domIds.mainDashboardId);
+  const banned = document.getElementById(domIds.bannedScreenId);
+
+  // Force loading state immediately
+  if (loading) loading.style.display = "block";
+  if (oldUi) oldUi.style.display = "none";
+  if (dashboard) dashboard.style.display = "none";
+  if (banned) banned.style.display = "none";
+
   onAuthStateChanged(auth, async (user) => {
     if (user) {
-      // Check if user is banned
-      const banRef = doc(db, "banned_users", user.uid);
-      const banSnap = await getDoc(banRef);
-
+      // Step A: Check if the user has been banned
+      const banSnap = await getDoc(doc(db, "banned_users", user.uid));
       if (banSnap.exists()) {
-        callbacks.onBanned();
+        if (loading) loading.style.display = "none";
+        if (banned) banned.style.display = "block";
         await signOut(auth);
       } else {
-        callbacks.onSignedIn(user);
+        // Safe to login!
+        if (loading) loading.style.display = "none";
+        if (dashboard) dashboard.style.display = "block";
       }
     } else {
-      // Check if they can be restored from backup
+      // Step B: Attempt silent session restoration
       const restoredUser = await loginWithBackupCredentials();
-      if (restoredUser) return; // loginWithBackupCredentials triggers onAuthStateChanged again
+      if (restoredUser) return;
 
-      // Check if they need migration from the old system
-      const oldUserDataRaw = localStorage.getItem("old_user_profile");
-      if (oldUserDataRaw) {
+      // Step C: Attempt silent legacy account migration
+      const oldUsername = findLegacyUsername();
+      if (oldUsername) {
         try {
-          const oldData = JSON.parse(oldUserDataRaw);
-          const oldName = oldData.displayName || oldData.username || "Guest";
-          const newUser = await signupWithUsername(oldName);
-          localStorage.removeItem("old_user_profile");
-          callbacks.onSignedIn(newUser);
-        } catch (error) {
-          callbacks.onSignedOut();
+          await signupWithUsername(oldUsername);
+          purgeLegacyKeys();
+          return;
+        } catch {
+          // If unique username check fails, fallback to show registration form
         }
-      } else {
-        callbacks.onSignedOut();
       }
+
+      // Step D: Clean slate (Show sign up form)
+      if (loading) loading.style.display = "none";
+      if (oldUi) oldUi.style.display = "block";
     }
   });
 }
+
